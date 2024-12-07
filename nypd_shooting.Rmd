@@ -1,0 +1,99 @@
+---
+title: "NYPD Shootings as Seasonal Data"
+date: "2024-11-19"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(lubridate)
+library(forecast)
+```
+
+## NYPD Seasonal Shootings
+
+### Import NYPD Shooting Data
+
+```{r import_data, echo=TRUE}
+url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+
+nyc_crimes <- read_csv(url)
+```
+
+## Tidy Data
+
+### Convert Date from a character to a date
+
+```{r convert_date, echo=TRUE}
+nyc_crimes <- nyc_crimes %>% 
+  mutate(OCCUR_DATE = as.Date(OCCUR_DATE, format = "%m/%d/%Y"))
+
+```
+
+## Visualize
+
+### Plot shootings over time
+
+```{r plot_by_month_year, echo=TRUE}
+library(ggplot2)
+
+ggplot(nyc_crimes, aes(x = OCCUR_DATE)) + 
+  geom_histogram(binwidth = 1) + 
+  labs(title = "NYPD Crimes Occurrences in 2018", 
+       x = "Occurrence Date", 
+       y = "Occurrences") + 
+  theme_bw()
+```
+
+### Group by Month and Year then Plot
+
+```{r plot_by_month_all_time, echo=TRUE}
+annual_crime_count <- nyc_crimes %>% 
+  group_by(month = floor_date(OCCUR_DATE, "month")) %>% 
+  summarize(count = n())
+
+ggplot(annual_crime_count, aes(x = month, y = count)) +
+  geom_line() +
+  labs(title = "NYC Crime Counts by month", x = "month", y = "Count") +
+  theme_bw()
+```
+
+### Group by Month and Plot
+
+```{r plot_by_month, echo=TRUE}
+nyc_crimes %>%
+    group_by(month = as.factor(month(nyc_crimes$OCCUR_DATE ))) %>%
+    summarise(total_shootings = n()) %>%
+    ggplot(aes(x = factor(month), y = total_shootings)) +
+    geom_bar(stat = "identity") +
+    labs(title = "Total Shootings by Month",
+         x = "Month",
+         y = "Total Shootings")
+```
+
+## Model
+
+### Match a sine curve to the data
+
+```{r sine_curve, echo=TRUE}
+occurrences <- nyc_crimes %>% 
+  group_by(month = month(OCCUR_DATE, label = TRUE),
+           year = year(OCCUR_DATE)) %>% 
+  summarize(n = n())
+
+model <- lm(n ~ sin(2 * pi * n), data = occurrences)
+
+summary(model)
+
+ggplot(occurrences, aes(x = month, y = n)) +
+  geom_line(aes(y = predict(model)), color = "red") +
+  geom_point()
+```
+
+
+# Conclusion
+
+#### The data matches the sine curve reasonably because it shows a very clear cyclic pattern of crime incidents throughout the year. It is also important to note that the data is not as comprehensive as it could be, as there are a variety of crimes that are not included in this data set. Nevertheless, it is still a good approximation of the overall trend of crime incidents in New York City.
