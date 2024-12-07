@@ -1,0 +1,173 @@
+---
+title: "Covid Surival Rates based on GDP"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(lubridate)
+```
+
+## Import global Covid Cases and Deaths
+
+```{r import_data, echo=TRUE}
+root_url = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+confirmed_global = read_csv(paste(root_url, "time_series_covid19_confirmed_global.csv", sep=""))
+deaths_global = read_csv(paste(root_url, "time_series_covid19_deaths_global.csv", sep=""))
+```
+
+## Tidy Data
+
+-   Convert from date columns to row columns
+
+-   Remove unnecessary columns and rename columns
+
+-   Merge cases and deaths
+
+-   Add population column
+
+-   Convert data character to date format
+
+-   Limit the year to just 2020
+
+-   Group by Country/Region
+
+```{r combine_global_confirmed_and_death, echo=TRUE}
+deaths_global <- deaths_global %>%
+    pivot_longer(cols = -c(`Province/State`,
+                           `Country/Region`, Lat, Long),
+                names_to = "date",
+                values_to = "deaths") %>%
+    select(-c(Lat, Long))
+
+confirmed_global <- confirmed_global %>%
+    pivot_longer(cols = -c(`Province/State`,
+                           `Country/Region`, Lat, Long),
+                names_to = "date",
+                values_to = "cases") %>%
+    select(-c(Lat, Long))
+
+global <- confirmed_global %>%
+    full_join(deaths_global) %>%
+    rename(Country_Region = `Country/Region`,
+           Province_State = `Province/State`) %>%
+    mutate(date = mdy(date))
+
+global = global[as.numeric(format(global$date, "%Y")) == 2020, ]
+global <- global %>%
+  group_by(Country_Region) %>%
+  summarise(cases = sum(cases),
+            deaths = sum(deaths))
+
+uid = read_csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv") %>%
+  select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+
+uid <- uid %>%
+  group_by(Country_Region) %>%
+  summarise(Population = sum(Population))
+
+global <- global %>%
+    left_join(uid, by = c("Country_Region")) %>%
+    select(Country_Region, cases, deaths, Population)
+
+
+```
+
+## Add  GDP Data
+
+-   Import GDP Data
+
+-   Remove unnecessary columns from GDP and rename columns
+
+-   Merge with global
+
+-   Add calculated columns
+
+    -   GDP per Capita
+
+    -   Cases per Capita
+
+    -   Deaths per Capita
+
+```{r per_capita, echo=TRUE}
+gdp = read_csv("https://raw.githubusercontent.com/datasets/gdp/refs/heads/main/data/gdp.csv")
+gdp <- gdp[gdp$Year == "2020", ]
+gdp <- gdp %>%
+  select(-c(Year, `Country Code`)) %>%
+  rename(Country_Region = `Country Name`,
+         GDP = Value)
+
+global <- global %>%
+    left_join(gdp, by = "Country_Region")
+
+
+global$gdp_pop = global$GDP / global$Population
+global$cases_pop = global$cases / global$Population
+global$deaths_pop = global$deaths / global$Population
+```
+
+# Cases Per GDP (plot)
+
+```{r plot_cases, echo=TRUE}
+ggplot(global, aes(x = gdp_pop, y = cases_pop)) +
+geom_point(size = 3) +
+labs(x = "GDP per capita", y = "Cases per capita", title = "COVID-19 Cases vs. GDP Per Capita") +
+theme_bw()
+
+ggplot(global, aes(x = log10(gdp_pop), y = cases_pop)) +
+geom_point(size = 3) +
+labs(x = "Log10 of GDP per capita", y = "Cases per capita", title = "COVID-19 Cases vs. GDP Per Capita") +
+theme_bw()
+```
+
+# Deaths Per GDP (plot)
+
+```{r plot_deaths, echo=TRUE}
+ggplot(global, aes(x = gdp_pop, y = deaths_pop)) +
+geom_point(size = 3) +
+labs(x = "GDP per capita", y = "Deaths per capita", title = "COVID-19 Deaths vs. GDP Per Capita") +
+theme_bw()
+
+ggplot(global, aes(x = log10(gdp_pop), y = deaths_pop)) +
+geom_point(size = 3) +
+labs(x = "Log10 of GDP per capita", y = "Deaths per capita", title = "COVID-19 Deaths vs. GDP Per Capita") +
+theme_bw()
+```
+
+# GDP and Death Correlation?
+
+## There might be a connection between deaths and gdp, lets compare deaths to cases
+
+```{r death_per_case, echo=TRUE}
+
+global$case_death_deaths_pop = global$deaths_pop / global$cases_pop
+
+ggplot(global, aes(x = gdp_pop, y = case_death_deaths_pop)) +
+geom_point(size = 3) +
+labs(x = "GDP per capita", y = "Deaths/Cases per capita", title = "COVID-19 Deaths/Cases vs. GDP Per Capita") +
+theme_bw()
+
+ggplot(global, aes(x = log10(gdp_pop), y = case_death_deaths_pop)) +
+geom_point(size = 3) +
+labs(x = "Log10 of GDP per capita", y = "Deaths/Cases per capita", title = "COVID-19 Deaths/Cases vs. GDP Per Capita") +
+theme_bw()
+
+```
+
+```{r trendline, echo=FALSE}
+global <- global[complete.cases(global), ]
+mod <- lm(gdp_pop ~ case_death_deaths_pop, data=global)
+summary(mod)
+global_mod <- global %>% mutate(pred = predict(mod))
+
+global_mod %>% ggplot() +
+  geom_point(aes(x = case_death_deaths_pop, y = gdp_pop), color ="blue") +
+  geom_point(aes(x = case_death_deaths_pop, y = pred), color ="red")
+```
+
+# Conclusion
+
+After looking at the data, we can see that there is not enough correlation for us to say that GDP and covid survival rate are related. After a close inspection of the data, there is no relationship. A relationship may be discovered if more variables are considered, but without any correlation whatsoever, it seems unlikely
